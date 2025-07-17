@@ -55,24 +55,34 @@ class PredictionApp:
         input_frame = ttk.Frame(self.root)
         input_frame.pack(pady=20, padx=20, fill="x")
         
+        # 溶液类型选择
+        ttk.Label(input_frame, text="溶液类型:").grid(row=0, column=0, sticky="w", pady=5)
+        self.solution_type_var = tk.StringVar(value="NaOH")
+        solution_types = ["NaOH", "NaCl"]
+        self.solution_type_combo = ttk.Combobox(input_frame, textvariable=self.solution_type_var,
+                                              values=solution_types, width=15, state="readonly")
+        self.solution_type_combo.grid(row=0, column=1, pady=5, padx=(10, 0))
+        self.solution_type_combo.bind("<<ComboboxSelected>>", self.on_solution_type_change)
+        
         # 浓度输入 (所有模型都需要)
-        ttk.Label(input_frame, text="浓度 (%NaOH):").grid(row=0, column=0, sticky="w", pady=5)
+        self.concentration_label = ttk.Label(input_frame, text="浓度 (%NaOH):")
+        self.concentration_label.grid(row=1, column=0, sticky="w", pady=5)
         self.x1_var = tk.StringVar()
         self.x1_entry = ttk.Entry(input_frame, textvariable=self.x1_var, width=15)
-        self.x1_entry.grid(row=0, column=1, pady=5, padx=(10, 0))
+        self.x1_entry.grid(row=1, column=1, pady=5, padx=(10, 0))
         
         # 温度输入 (用于大部分模型)
-        ttk.Label(input_frame, text="温度 (°C):").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="温度 (°C):").grid(row=2, column=0, sticky="w", pady=5)
         self.x2_var = tk.StringVar()
         self.x2_entry = ttk.Entry(input_frame, textvariable=self.x2_var, width=15)
-        self.x2_entry.grid(row=1, column=1, pady=5, padx=(10, 0))
+        self.x2_entry.grid(row=2, column=1, pady=5, padx=(10, 0))
         
         # 压力输入 (用于bubble point模型)
-        ttk.Label(input_frame, text="压力:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="压力:").grid(row=3, column=0, sticky="w", pady=5)
         
         # 压力输入框架
         pressure_frame = ttk.Frame(input_frame)
-        pressure_frame.grid(row=2, column=1, pady=5, padx=(10, 0), sticky="w")
+        pressure_frame.grid(row=3, column=1, pady=5, padx=(10, 0), sticky="w")
         
         self.x3_var = tk.StringVar()
         self.x3_entry = ttk.Entry(pressure_frame, textvariable=self.x3_var, width=10)
@@ -102,12 +112,21 @@ class PredictionApp:
         self.result_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
     
+    def on_solution_type_change(self, event=None):
+        """更新浓度标签根据溶液类型"""
+        solution_type = self.solution_type_var.get()
+        if solution_type == "NaOH":
+            self.concentration_label.config(text="浓度 (%NaOH):")
+        else:
+            self.concentration_label.config(text="浓度 (%NaCl):")
+    
     def predict(self):
         try:
             # 获取输入值
             x1 = float(self.x1_var.get()) if self.x1_var.get() else None
             x2 = float(self.x2_var.get()) if self.x2_var.get() else None
             x3 = float(self.x3_var.get()) if self.x3_var.get() else None
+            solution_type = self.solution_type_var.get()
             
             if x1 is None:
                 messagebox.showerror("输入错误", "浓度 (X1) 是必填项")
@@ -117,11 +136,23 @@ class PredictionApp:
             self.result_text.delete(1.0, tk.END)
             
             # 进行预测
-            self.result_text.insert(tk.END, "预测结果:\n")
+            self.result_text.insert(tk.END, f"预测结果 ({solution_type}):\n")
             self.result_text.insert(tk.END, "=" * 40 + "\n")
             
-            # 检查模型数据结构
+            # 根据溶液类型过滤模型
+            filtered_models = {}
             for stem, model_data in self.models.items():
+                if solution_type == "NaOH" and stem.startswith("NaOH"):
+                    filtered_models[stem] = model_data
+                elif solution_type == "NaCl" and stem.startswith("NaCl"):
+                    filtered_models[stem] = model_data
+            
+            if not filtered_models:
+                self.result_text.insert(tk.END, f"没有找到 {solution_type} 的预测模型\n")
+                return
+            
+            # 检查模型数据结构
+            for stem, model_data in filtered_models.items():
                 # 兼容旧版本模型格式
                 if isinstance(model_data, dict):
                     pipe = model_data["model"]
@@ -150,14 +181,16 @@ class PredictionApp:
                 label = stem.replace("_", " ").title()
                 
                 # 根据属性添加单位
-                if stem == "vapor_pressure":
+                if "vapor_pressure" in stem:
                     unit = "mmHg"
-                elif stem == "viscosity":
+                elif "viscosity" in stem:
                     unit = "cp"
-                elif stem == "enthalpy":
+                elif "enthalpy" in stem:
                     unit = "kcal/kgNaOH"
                 elif "bubblepoint" in stem:
                     unit = "°C"
+                elif "density" in stem:
+                    unit = "kg/m³"
                 else:
                     unit = ""
                 

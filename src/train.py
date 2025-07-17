@@ -76,7 +76,7 @@ def main():
         y_pred = pipe.predict(X_te)
         rmse   = np.sqrt(mean_squared_error(y_te, y_pred))
         r2     = r2_score(y_te, y_pred)
-        print(f"{stem:15s} → RMSE: {rmse:.4f},  R²: {r2:.4f}")
+        print(f"{stem:15s} -> RMSE: {rmse:.4f},  R2: {r2:.4f}")
 
         models[stem] = {"model": pipe, "features": x_cols}
 
