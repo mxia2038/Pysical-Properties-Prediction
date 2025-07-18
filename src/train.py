@@ -142,6 +142,10 @@ def main():
             # Bubble point uses X1 (concentration) and X3 (pressure)
             x_cols = ["X1", "X3"]
             y_cols = [c for c in df.columns if c not in ("X1", "X3")]
+        elif "concentration" in stem:
+            # NaCl concentration uses X2 (temperature) and X4 (density)
+            x_cols = ["X2", "X4"]
+            y_cols = [c for c in df.columns if c not in ("X2", "X4")]
         else:
             # Other datasets use X1 (concentration) and X2 (temperature)
             x_cols = ["X1", "X2"]
