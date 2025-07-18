@@ -45,6 +45,23 @@ class PredictionApp:
         else:
             return pressure_value
     
+    def convert_vapor_pressure_from_mmhg(self, pressure_mmhg, target_unit):
+        """将蒸汽压从mmHg转换为目标单位"""
+        if target_unit == "mmHg":
+            return pressure_mmhg
+        elif target_unit == "kPa":
+            return pressure_mmhg * 0.133322  # 1 mmHg = 0.133322 kPa
+        elif target_unit == "bar":
+            return pressure_mmhg * 0.00133322  # 1 mmHg = 0.00133322 bar
+        elif target_unit == "atm":
+            return pressure_mmhg * 0.00131579  # 1 mmHg = 0.00131579 atm
+        elif target_unit == "psi":
+            return pressure_mmhg * 0.0193368  # 1 mmHg = 0.0193368 psi
+        elif target_unit == "torr":
+            return pressure_mmhg * 1.0  # 1 mmHg = 1 torr
+        else:
+            return pressure_mmhg
+    
     def setup_ui(self):
         # 标题
         title_label = tk.Label(self.root, text="物性预测器", 
@@ -58,7 +75,7 @@ class PredictionApp:
         # 溶液类型选择
         ttk.Label(input_frame, text="溶液类型:").grid(row=0, column=0, sticky="w", pady=5)
         self.solution_type_var = tk.StringVar(value="NaOH")
-        solution_types = ["NaOH", "NaCl"]
+        solution_types = ["NaOH", "NaCl", "HCl"]
         self.solution_type_combo = ttk.Combobox(input_frame, textvariable=self.solution_type_var,
                                               values=solution_types, width=15, state="readonly")
         self.solution_type_combo.grid(row=0, column=1, pady=5, padx=(10, 0))
@@ -95,6 +112,14 @@ class PredictionApp:
                                               values=pressure_units, width=8, state="readonly")
         self.pressure_unit_combo.pack(side="left", padx=(5, 0))
         
+        # 蒸汽压结果单位选择
+        ttk.Label(input_frame, text="蒸汽压结果单位:").grid(row=4, column=0, sticky="w", pady=5)
+        self.vapor_pressure_unit_var = tk.StringVar(value="mmHg")
+        vapor_pressure_units = ["mmHg", "kPa", "bar", "atm", "psi", "torr"]
+        self.vapor_pressure_unit_combo = ttk.Combobox(input_frame, textvariable=self.vapor_pressure_unit_var,
+                                                    values=vapor_pressure_units, width=15, state="readonly")
+        self.vapor_pressure_unit_combo.grid(row=4, column=1, pady=5, padx=(10, 0))
+        
         # 预测按钮
         predict_btn = ttk.Button(self.root, text="开始预测", command=self.predict)
         predict_btn.pack(pady=20)
@@ -117,8 +142,10 @@ class PredictionApp:
         solution_type = self.solution_type_var.get()
         if solution_type == "NaOH":
             self.concentration_label.config(text="浓度 (%NaOH):")
-        else:
+        elif solution_type == "NaCl":
             self.concentration_label.config(text="浓度 (%NaCl):")
+        else:  # HCl
+            self.concentration_label.config(text="浓度 (%HCl):")
     
     def predict(self):
         try:
@@ -146,6 +173,8 @@ class PredictionApp:
                     filtered_models[stem] = model_data
                 elif solution_type == "NaCl" and stem.startswith("NaCl"):
                     filtered_models[stem] = model_data
+                elif solution_type == "HCl" and stem.startswith("HCl"):
+                    filtered_models[stem] = model_data
             
             if not filtered_models:
                 self.result_text.insert(tk.END, f"没有找到 {solution_type} 的预测模型\n")
@@ -171,6 +200,33 @@ class PredictionApp:
                     pressure_unit = self.pressure_unit_var.get()
                     x3_bar = self.convert_pressure_to_bar(x3, pressure_unit)
                     sample = pd.DataFrame({"X1": [x1], "X3": [x3_bar]})
+                elif "HCl" in stem and "vapor_pressure" in stem:
+                    if x2 is None:
+                        self.result_text.insert(tk.END, f"跳过 {stem} (需要温度输入)\n")
+                        continue
+                    # Create advanced features for Neural Network
+                    import numpy as np
+                    T_K = x2 + 273.15
+                    
+                    # Create all advanced features
+                    feature_dict = {
+                        "X1": [x1],
+                        "X2": [x2],
+                        "inv_T": [1 / T_K],
+                        "log_T": [np.log(T_K)],
+                        "sqrt_T": [np.sqrt(T_K)],
+                        "log_X1": [np.log(x1 + 1)],
+                        "sqrt_X1": [np.sqrt(x1)],
+                        "X1_squared": [x1 ** 2],
+                        "X1_inv_T": [x1 / T_K],
+                        "X1_log_T": [x1 * np.log(T_K)],
+                        "X1_sqrt_T": [x1 * np.sqrt(T_K)],
+                        "X1_X2": [x1 * x2],
+                        "X1_X2_inv_T": [x1 * x2 / T_K],
+                        "exp_inv_T": [np.exp(1 / T_K)],
+                        "X1_exp_inv_T": [x1 * np.exp(1 / T_K)]
+                    }
+                    sample = pd.DataFrame(feature_dict)
                 else:
                     if x2 is None:
                         self.result_text.insert(tk.END, f"跳过 {stem} (需要温度输入)\n")
@@ -180,9 +236,29 @@ class PredictionApp:
                 val = pipe.predict(sample)[0]
                 label = stem.replace("_", " ").title()
                 
-                # 根据属性添加单位
+                # 根据属性添加单位和转换
                 if "vapor_pressure" in stem:
-                    unit = "mmHg"
+                    # 获取用户选择的蒸汽压单位
+                    selected_unit = self.vapor_pressure_unit_var.get()
+                    # 模型预测的是mmHg，转换为用户选择的单位
+                    converted_val = self.convert_vapor_pressure_from_mmhg(val, selected_unit)
+                    
+                    # 显示主要单位的结果
+                    result_line = f"{label:18s}: {converted_val:8.4f} {selected_unit}\n"
+                    self.result_text.insert(tk.END, result_line)
+                    
+                    # 如果用户选择的不是mmHg，也显示常用单位供参考
+                    if selected_unit != "mmHg":
+                        other_units = ["kPa", "bar", "atm", "psi"]
+                        if selected_unit in other_units:
+                            other_units.remove(selected_unit)
+                        
+                        for other_unit in other_units[:2]:  # 显示前两个其他单位
+                            other_val = self.convert_vapor_pressure_from_mmhg(val, other_unit)
+                            self.result_text.insert(tk.END, f"{'':<18s}  ({other_val:8.4f} {other_unit})\n")
+                    
+                    continue  # 已经处理了vapor_pressure，跳过后续处理
+                    
                 elif "viscosity" in stem:
                     unit = "cp"
                 elif "enthalpy" in stem:
