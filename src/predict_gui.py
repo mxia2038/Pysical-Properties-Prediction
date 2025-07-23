@@ -11,7 +11,7 @@ class PredictionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("氯碱工业理化常数计算软件V1.0")
-        self.root.geometry("700x600")  # 增加窗口大小以适应新格式
+        self.root.geometry("800x550")
         self.root.resizable(True, True)
         self.root.configure(bg="#f0f0f0")  # 设置窗口背景色
         
@@ -46,6 +46,21 @@ class PredictionApp:
             return pressure_value * 0.980665  # 1 kg/cm2 = 0.980665 bar
         else:
             return pressure_value
+    
+    def format_property_name(self, stem):
+        """格式化属性名称，保持正确的化学式大小写"""
+        # 将下划线转为空格并首字母大写
+        formatted = stem.replace("_", " ").title()
+        
+        # 修正化学式的大小写
+        formatted = formatted.replace("Naoh", "NaOH")
+        formatted = formatted.replace("Nacl", "NaCl")
+        formatted = formatted.replace("Hcl", "HCl")
+        
+        # 修正术语
+        formatted = formatted.replace("Bubblepoint", "Bubble Point Temperature")
+        
+        return formatted
     
     def convert_vapor_pressure_from_mmhg(self, pressure_mmhg, target_unit):
         """将蒸汽压从mmHg转换为目标单位"""
@@ -90,76 +105,79 @@ class PredictionApp:
                 
                 # 显示logo (单独一行，居中)
                 logo_label = tk.Label(self.root, image=self.logo_photo)
-                logo_label.pack(pady=10)
+                logo_label.pack(pady=5)
         except Exception as e:
             print(f"无法加载logo: {e}")
         
         # 标题 (独立行)
         title_label = tk.Label(self.root, text="氯碱工业理化常数计算软件V1.0", 
                               font=("Arial", 14, "bold"))
-        title_label.pack(pady=(5, 15))
+        title_label.pack(pady=(2, 8))
         
         # 输入框架
-        input_frame = ttk.LabelFrame(self.root, text="输入参数", padding=15)
-        input_frame.pack(pady=15, padx=30, fill="x")
+        input_frame = ttk.LabelFrame(self.root, text="输入参数", padding=10)
+        input_frame.pack(pady=8, padx=20, fill="x")
         
+        # 使用两列布局
+        # 左列
         # 溶液类型选择
-        ttk.Label(input_frame, text="溶液类型:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="溶液类型:").grid(row=0, column=0, sticky="w", pady=3)
         self.solution_type_var = tk.StringVar(value="NaOH")
         solution_types = ["NaOH", "NaCl", "HCl"]
         self.solution_type_combo = ttk.Combobox(input_frame, textvariable=self.solution_type_var,
-                                              values=solution_types, width=15, state="readonly")
-        self.solution_type_combo.grid(row=0, column=1, pady=5, padx=(10, 0))
+                                              values=solution_types, width=12, state="readonly")
+        self.solution_type_combo.grid(row=0, column=1, pady=3, padx=(5, 20))
         self.solution_type_combo.bind("<<ComboboxSelected>>", self.on_solution_type_change)
         
         # 浓度输入 (所有模型都需要)
         self.concentration_label = ttk.Label(input_frame, text="浓度 (%NaOH):")
-        self.concentration_label.grid(row=1, column=0, sticky="w", pady=5)
+        self.concentration_label.grid(row=1, column=0, sticky="w", pady=3)
         self.x1_var = tk.StringVar()
-        self.x1_entry = ttk.Entry(input_frame, textvariable=self.x1_var, width=15)
-        self.x1_entry.grid(row=1, column=1, pady=5, padx=(10, 0))
+        self.x1_entry = ttk.Entry(input_frame, textvariable=self.x1_var, width=12)
+        self.x1_entry.grid(row=1, column=1, pady=3, padx=(5, 20))
         
         # 温度输入 (用于大部分模型)
-        ttk.Label(input_frame, text="温度 (°C):").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="温度 (°C):").grid(row=2, column=0, sticky="w", pady=3)
         self.x2_var = tk.StringVar()
-        self.x2_entry = ttk.Entry(input_frame, textvariable=self.x2_var, width=15)
-        self.x2_entry.grid(row=2, column=1, pady=5, padx=(10, 0))
+        self.x2_entry = ttk.Entry(input_frame, textvariable=self.x2_var, width=12)
+        self.x2_entry.grid(row=2, column=1, pady=3, padx=(5, 20))
         
+        # 右列
         # 密度输入 (用于NaCl浓度预测)
-        ttk.Label(input_frame, text="密度 (kg/m³):").grid(row=3, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="密度 (kg/m³):").grid(row=0, column=2, sticky="w", pady=3)
         self.x4_var = tk.StringVar()
-        self.x4_entry = ttk.Entry(input_frame, textvariable=self.x4_var, width=15)
-        self.x4_entry.grid(row=3, column=1, pady=5, padx=(10, 0))
+        self.x4_entry = ttk.Entry(input_frame, textvariable=self.x4_var, width=12)
+        self.x4_entry.grid(row=0, column=3, pady=3, padx=(5, 0))
         
         # 压力输入 (用于bubble point模型)
-        ttk.Label(input_frame, text="压力:").grid(row=4, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="压力:").grid(row=1, column=2, sticky="w", pady=3)
         
         # 压力输入框架
         pressure_frame = ttk.Frame(input_frame)
-        pressure_frame.grid(row=4, column=1, pady=5, padx=(10, 0), sticky="w")
+        pressure_frame.grid(row=1, column=3, pady=3, padx=(5, 0), sticky="w")
         
         self.x3_var = tk.StringVar()
-        self.x3_entry = ttk.Entry(pressure_frame, textvariable=self.x3_var, width=10)
+        self.x3_entry = ttk.Entry(pressure_frame, textvariable=self.x3_var, width=8)
         self.x3_entry.pack(side="left")
         
         # 压力单位下拉菜单
         self.pressure_unit_var = tk.StringVar(value="bar.A")
         pressure_units = ["bar.A", "kPa.A", "MPa.A", "kg/cm2.A"]
         self.pressure_unit_combo = ttk.Combobox(pressure_frame, textvariable=self.pressure_unit_var,
-                                              values=pressure_units, width=8, state="readonly")
-        self.pressure_unit_combo.pack(side="left", padx=(5, 0))
+                                              values=pressure_units, width=6, state="readonly")
+        self.pressure_unit_combo.pack(side="left", padx=(3, 0))
         
         # 蒸汽压结果单位选择
-        ttk.Label(input_frame, text="蒸汽压结果单位:").grid(row=5, column=0, sticky="w", pady=5)
+        ttk.Label(input_frame, text="蒸汽压结果单位:").grid(row=2, column=2, sticky="w", pady=3)
         self.vapor_pressure_unit_var = tk.StringVar(value="mmHg")
         vapor_pressure_units = ["mmHg", "kPa", "bar", "atm", "psi", "torr"]
         self.vapor_pressure_unit_combo = ttk.Combobox(input_frame, textvariable=self.vapor_pressure_unit_var,
-                                                    values=vapor_pressure_units, width=15, state="readonly")
-        self.vapor_pressure_unit_combo.grid(row=5, column=1, pady=5, padx=(10, 0))
+                                                    values=vapor_pressure_units, width=12, state="readonly")
+        self.vapor_pressure_unit_combo.grid(row=2, column=3, pady=3, padx=(5, 0))
         
         # 预测按钮框架
         button_frame = ttk.Frame(self.root)
-        button_frame.pack(pady=20)
+        button_frame.pack(pady=10)
         
         predict_btn = ttk.Button(button_frame, text="🚀 开始计算", command=self.predict,
                                style="Accent.TButton")
@@ -172,16 +190,16 @@ class PredictionApp:
                        padding=(20, 10))
         
         # 结果显示框架
-        result_frame = ttk.LabelFrame(self.root, text="预测结果", padding=15)
-        result_frame.pack(pady=15, padx=30, fill="both", expand=True)
+        result_frame = ttk.LabelFrame(self.root, text="计算结果", padding=10)
+        result_frame.pack(pady=8, padx=20, fill="both", expand=True)
         
         # 创建结果显示的表格样式框架
-        self.result_text = tk.Text(result_frame, height=12, width=60, 
-                                  font=("Consolas", 10), 
-                                  bg="#f8f9fa", 
+        self.result_text = tk.Text(result_frame, height=10, width=70, 
+                                  font=("Consolas", 12), 
+                                  bg="white", 
                                   relief="solid", 
                                   borderwidth=1,
-                                  padx=10, pady=10)
+                                  padx=8, pady=8)
         scrollbar = ttk.Scrollbar(result_frame, orient="vertical", 
                                  command=self.result_text.yview)
         self.result_text.configure(yscrollcommand=scrollbar.set)
@@ -190,12 +208,12 @@ class PredictionApp:
         scrollbar.pack(side="right", fill="y")
         
         # 配置文本标签样式
-        self.result_text.tag_configure("header", font=("Consolas", 11, "bold"), foreground="#2c3e50")
-        self.result_text.tag_configure("separator", foreground="#7f8c8d")
-        self.result_text.tag_configure("property", font=("Consolas", 10, "bold"), foreground="#34495e")
-        self.result_text.tag_configure("value", foreground="#27ae60")
-        self.result_text.tag_configure("unit", foreground="#8e44ad")
-        self.result_text.tag_configure("skip", foreground="#e74c3c", font=("Consolas", 9, "italic"))
+        self.result_text.tag_configure("header", font=("Arial", 12, "bold"))
+        self.result_text.tag_configure("separator")
+        self.result_text.tag_configure("property", font=("Arial", 12))
+        self.result_text.tag_configure("value", font=("Arial", 12))
+        self.result_text.tag_configure("unit", font=("Arial", 12))
+        self.result_text.tag_configure("skip", font=("Arial", 12, "italic"))
     
     def on_solution_type_change(self, event=None):
         """更新浓度标签根据溶液类型"""
@@ -239,7 +257,7 @@ class PredictionApp:
             self.result_text.delete(1.0, tk.END)
             
             # 显示加载状态
-            self.result_text.insert(tk.END, "🔄 正在计算中...\n", "header")
+            self.result_text.insert(tk.END, "正在计算中...\n")
             self.root.update()
             
             # 获取输入值
@@ -253,10 +271,10 @@ class PredictionApp:
             validation_errors = self.validate_inputs(x1, x2, x3, x4, solution_type)
             if validation_errors:
                 self.result_text.delete(1.0, tk.END)
-                error_msg = "❌ 输入验证失败:\n"
+                error_msg = "输入验证失败:\n"
                 for error in validation_errors:
-                    error_msg += f"   • {error}\n"
-                self.result_text.insert(tk.END, error_msg, "skip")
+                    error_msg += f"  {error}\n"
+                self.result_text.insert(tk.END, error_msg)
                 return
             
             # 验证必要输入 (根据模型类型不同)
@@ -265,15 +283,15 @@ class PredictionApp:
             
             if not has_concentration_model and x1 is None:
                 self.result_text.delete(1.0, tk.END)
-                self.result_text.insert(tk.END, "❌ 浓度 (X1) 是必填项\n", "skip")
+                self.result_text.insert(tk.END, "浓度 (X1) 是必填项\n")
                 return
             
             # 清空加载状态，显示结果
             self.result_text.delete(1.0, tk.END)
-            header_text = f"✅ 预测结果 ({solution_type}):"
-            self.result_text.insert(tk.END, header_text + "\n", "header")
-            separator_line = "═" * 50
-            self.result_text.insert(tk.END, separator_line + "\n", "separator")
+            header_text = f"计算结果 ({solution_type}):\n"
+            self.result_text.insert(tk.END, header_text, "header")
+            separator_line = "-" * 40 + "\n"
+            self.result_text.insert(tk.END, separator_line)
             
             # 根据溶液类型过滤模型
             filtered_models = {}
@@ -286,8 +304,8 @@ class PredictionApp:
                     filtered_models[stem] = model_data
             
             if not filtered_models:
-                error_msg = f"❌ 没有找到 {solution_type} 的预测模型\n"
-                self.result_text.insert(tk.END, error_msg, "skip")
+                error_msg = f"没有找到 {solution_type} 的预测模型\n"
+                self.result_text.insert(tk.END, error_msg)
                 return
             
             # 检查模型数据结构
@@ -304,8 +322,9 @@ class PredictionApp:
                 # 根据模型所需特征创建输入样本
                 if "bubblepoint" in stem:
                     if x3 is None:
-                        skip_msg = f"⚠ 跳过 {stem.replace('_', ' ').title()} (需要压力输入)\n"
-                        self.result_text.insert(tk.END, skip_msg, "skip")
+                        formatted_name = self.format_property_name(stem)
+                        skip_msg = f"跳过 {formatted_name} (需要压力输入)\n"
+                        self.result_text.insert(tk.END, skip_msg)
                         continue
                     # 将压力转换为bar.A
                     pressure_unit = self.pressure_unit_var.get()
@@ -313,15 +332,17 @@ class PredictionApp:
                     sample = pd.DataFrame({"X1": [x1], "X3": [x3_bar]})
                 elif "concentration" in stem:
                     if x2 is None or x4 is None:
-                        skip_msg = f"⚠ 跳过 {stem.replace('_', ' ').title()} (需要温度和密度输入)\n"
-                        self.result_text.insert(tk.END, skip_msg, "skip")
+                        formatted_name = self.format_property_name(stem)
+                        skip_msg = f"跳过 {formatted_name} (需要温度和密度输入)\n"
+                        self.result_text.insert(tk.END, skip_msg)
                         continue
                     # NaCl浓度预测使用温度和密度
                     sample = pd.DataFrame({"X2": [x2], "X4": [x4]})
                 elif "HCl" in stem and "vapor_pressure" in stem:
                     if x2 is None:
-                        skip_msg = f"⚠ 跳过 {stem.replace('_', ' ').title()} (需要温度输入)\n"
-                        self.result_text.insert(tk.END, skip_msg, "skip")
+                        formatted_name = self.format_property_name(stem)
+                        skip_msg = f"跳过 {formatted_name} (需要温度输入)\n"
+                        self.result_text.insert(tk.END, skip_msg)
                         continue
                     # Create advanced features for Neural Network
                     import numpy as np
@@ -348,13 +369,14 @@ class PredictionApp:
                     sample = pd.DataFrame(feature_dict)
                 else:
                     if x2 is None:
-                        skip_msg = f"⚠ 跳过 {stem.replace('_', ' ').title()} (需要温度输入)\n"
-                        self.result_text.insert(tk.END, skip_msg, "skip")
+                        formatted_name = self.format_property_name(stem)
+                        skip_msg = f"跳过 {formatted_name} (需要温度输入)\n"
+                        self.result_text.insert(tk.END, skip_msg)
                         continue
                     sample = pd.DataFrame({"X1": [x1], "X2": [x2]})
                 
                 val = pipe.predict(sample)[0]
-                label = stem.replace("_", " ").title()
+                label = self.format_property_name(stem)
                 
                 # 根据属性添加单位和转换
                 if "vapor_pressure" in stem:
@@ -363,14 +385,9 @@ class PredictionApp:
                     # 模型预测的是mmHg，转换为用户选择的单位
                     converted_val = self.convert_vapor_pressure_from_mmhg(val, selected_unit)
                     
-                    # 格式化显示结果
-                    property_name = f"📊 {label:15s}"
-                    value_text = f": {converted_val:8.4f} "
-                    unit_text = f"{selected_unit}\n"
-                    
-                    self.result_text.insert(tk.END, property_name, "property")
-                    self.result_text.insert(tk.END, value_text, "value")
-                    self.result_text.insert(tk.END, unit_text, "unit")
+                    # 格式化显示结果（对齐列显示）
+                    result_line = f"{label:<25}: {converted_val:>10.4f} {selected_unit}\n"
+                    self.result_text.insert(tk.END, result_line)
                     
                     # 如果用户选择的不是mmHg，也显示常用单位供参考
                     if selected_unit != "mmHg":
@@ -380,8 +397,8 @@ class PredictionApp:
                         
                         for other_unit in other_units[:2]:  # 显示前两个其他单位
                             other_val = self.convert_vapor_pressure_from_mmhg(val, other_unit)
-                            ref_text = f"   ╰─ ({other_val:8.4f} {other_unit})\n"
-                            self.result_text.insert(tk.END, ref_text, "unit")
+                            ref_text = f"{'':<25}  ({other_val:>10.4f} {other_unit})\n"
+                            self.result_text.insert(tk.END, ref_text)
                     
                     continue  # 已经处理了vapor_pressure，跳过后续处理
                     
@@ -398,27 +415,22 @@ class PredictionApp:
                 else:
                     unit = ""
                 
-                # 格式化其他属性的显示
-                property_name = f"📊 {label:15s}"
-                value_text = f": {val:8.4f} "
-                
-                self.result_text.insert(tk.END, property_name, "property")
-                self.result_text.insert(tk.END, value_text, "value")
-                
+                # 格式化其他属性的显示（对齐列显示）
                 if unit:
-                    unit_text = f"{unit}\n"
-                    self.result_text.insert(tk.END, unit_text, "unit")
+                    result_line = f"{label:<25}: {val:>10.4f} {unit}\n"
                 else:
-                    self.result_text.insert(tk.END, "\n")
+                    result_line = f"{label:<25}: {val:>10.4f}\n"
+                
+                self.result_text.insert(tk.END, result_line)
             
             # 结束分隔线
-            end_separator = "═" * 50
-            self.result_text.insert(tk.END, end_separator + "\n", "separator")
+            end_separator = "-" * 40 + "\n"
+            self.result_text.insert(tk.END, end_separator)
             
         except ValueError:
             messagebox.showerror("输入错误", "请输入有效的数值")
         except Exception as e:
-            messagebox.showerror("预测错误", f"预测过程中出现错误：{str(e)}")
+            messagebox.showerror("计算错误", f"计算过程中出现错误：{str(e)}")
 
 def main():
     root = tk.Tk()
