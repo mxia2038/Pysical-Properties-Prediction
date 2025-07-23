@@ -18,10 +18,9 @@
 - **Train models**: `/mnt/d/Prediction/.venv/Scripts/python.exe src/train.py`
 - **Run GUI**: `/mnt/d/Prediction/.venv/Scripts/python.exe src/predict_gui.py`
 - **Build executable**: `/mnt/d/Prediction/.venv/Scripts/pyinstaller.exe build.spec`
-- **Test functionality**: `/mnt/d/Prediction/.venv/Scripts/python.exe src/predict.py`
 
 ## Project Structure
-- `src/` - Source code (GUI, training, prediction)
+- `src/` - Source code (GUI, training)
 - `data/` - CSV datasets (NaOH_*, NaCl_*)
 - `models/` - Trained ML models
 - `dist/` - Built executable

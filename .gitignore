@@ -23,7 +23,8 @@ MANIFEST
 
 # PyInstaller
 *.manifest
-*.spec
+# Keep build.spec but ignore build output
+build/
 
 # Environments
 .env
@@ -51,5 +52,4 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-models/*.pkl
-data/*.csv
+# Keep models and data files for the application
