@@ -412,6 +412,8 @@ class PredictionApp:
                     unit = "kg/m³"
                 elif "concentration" in stem:
                     unit = "g/L"
+                elif "thermal_conductivity" in stem:
+                    unit = "kcal/m.hr.°C"
                 else:
                     unit = ""
                 
