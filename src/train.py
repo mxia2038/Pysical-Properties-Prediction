@@ -171,6 +171,8 @@ def main():
             pipe = make_pipeline(log_tf=True, use_nn=True)  # Neural Network with log transform
         elif "bubblepoint" in stem:
             pipe = make_pipeline(log_tf=any(target in stem for target in LOG_TARGETS), degree=BUBBLEPOINT_DEGREE)
+        elif "NaOH_density" in stem:
+            pipe = make_pipeline(log_tf=any(target in stem for target in LOG_TARGETS), degree=2)  # Lower degree to prevent unphysical behavior
         else:
             pipe = make_pipeline(log_tf=any(target in stem for target in LOG_TARGETS))
         pipe.fit(X_tr, y_tr)
