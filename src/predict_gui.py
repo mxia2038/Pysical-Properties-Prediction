@@ -507,17 +507,17 @@ class PredictionApp:
             else:
                 pipe = model_data
             
-            # 检查模型类型
+            # 检查模型类型 - 优先检查TransformedTargetRegressor (log-transformed models)
             if hasattr(pipe, 'named_steps'):
-                if 'poly' in pipe.named_steps:
-                    # Ridge regression with polynomial features
-                    return self.extract_polynomial_formula(pipe, model_name)
-                elif hasattr(pipe.named_steps.get('reg'), 'regressor_'):
-                    # TransformedTargetRegressor - could be Neural Network with log transformation
+                if hasattr(pipe.named_steps.get('reg'), 'regressor_'):
+                    # TransformedTargetRegressor - log transformation models
                     if "HCl" in model_name and "vapor_pressure" in model_name:
                         return self.extract_hcl_neural_network_formula(pipe, model_name)
                     else:
                         return self.extract_log_transformed_formula(pipe, model_name)
+                elif 'poly' in pipe.named_steps:
+                    # Regular Ridge regression with polynomial features (no log transform)
+                    return self.extract_polynomial_formula(pipe, model_name)
                 elif hasattr(pipe.named_steps.get('reg'), 'hidden_layer_sizes'):
                     # Neural Network without log transformation
                     return self.extract_neural_network_formula(pipe, model_name)
@@ -527,7 +527,7 @@ class PredictionApp:
             return f"无法提取公式: {str(e)}"
     
     def extract_polynomial_formula(self, pipe, model_name):
-        """提取多项式回归公式"""
+        """提取多项式回归公式 - 支持动态度数"""
         try:
             # Check for different step names (scale vs scaler)
             if 'scale' in pipe.named_steps:
@@ -547,6 +547,7 @@ class PredictionApp:
             scale_std = scaler.scale_
             coefficients = actual_regressor.coef_
             intercept = actual_regressor.intercept_
+            degree = poly.degree
             
             # 获取变量名称
             if "bubblepoint" in model_name:
@@ -574,56 +575,136 @@ class PredictionApp:
             else:
                 unit = ""
             
-            # 计算展开后的系数
+            # 计算展开后的系数 - 动态适应度数
             if len(scale_mean) == 2:
                 mean1, mean2 = scale_mean[0], scale_mean[1]
                 std1, std2 = scale_std[0], scale_std[1]
                 
-                c0 = intercept
-                c1 = coefficients[0] if len(coefficients) > 0 else 0
-                c2 = coefficients[1] if len(coefficients) > 1 else 0
-                c3 = coefficients[2] if len(coefficients) > 2 else 0
-                c4 = coefficients[3] if len(coefficients) > 3 else 0
-                c5 = coefficients[4] if len(coefficients) > 4 else 0
+                # 获取特征名称以正确映射系数
+                feature_names = poly.get_feature_names_out(['X1', 'X2'])
                 
-                # 展开公式系数
-                coeff_constant = c0 - (c1*mean1/std1) - (c2*mean2/std2) + (c3*mean1**2/std1**2) + (c4*mean1*mean2/(std1*std2)) + (c5*mean2**2/std2**2)
-                coeff_X1 = (c1/std1) - (2*c3*mean1/std1**2) - (c4*mean2/(std1*std2))
-                coeff_X2 = (c2/std2) - (c4*mean1/(std1*std2)) - (2*c5*mean2/std2**2)
-                coeff_X1_sq = c3/std1**2 if abs(c3) > 1e-10 else 0
-                coeff_X1_X2 = c4/(std1*std2) if abs(c4) > 1e-10 else 0
-                coeff_X2_sq = c5/std2**2 if abs(c5) > 1e-10 else 0
+                # 构建系数映射
+                coeff_map = {}
+                for i, feature_name in enumerate(feature_names):
+                    if i < len(coefficients):
+                        coeff_map[feature_name] = coefficients[i]
                 
-                formula = f"Y = {coeff_constant:.6f}"
-                if abs(coeff_X1) > 1e-10:
-                    formula += f" + {coeff_X1:.6f}*X1"
-                if abs(coeff_X2) > 1e-10:
-                    formula += f" + {coeff_X2:.6f}*X2"
-                if abs(coeff_X1_sq) > 1e-10:
-                    formula += f" + {coeff_X1_sq:.6f}*X1^2"
-                if abs(coeff_X1_X2) > 1e-10:
-                    formula += f" + {coeff_X1_X2:.6f}*X1*X2"
-                if abs(coeff_X2_sq) > 1e-10:
-                    formula += f" + {coeff_X2_sq:.6f}*X2^2"
+                # 计算展开的系数
+                expanded_coeffs = {}
                 
-                # 清理公式格式
-                formula = formula.replace(" + -", " - ")
+                # 常数项
+                expanded_coeffs['constant'] = intercept
+                
+                # 一次项系数
+                expanded_coeffs['X1'] = 0
+                expanded_coeffs['X2'] = 0
+                
+                # 二次项系数  
+                expanded_coeffs['X1^2'] = 0
+                expanded_coeffs['X1*X2'] = 0
+                expanded_coeffs['X2^2'] = 0
+                
+                # 三次项系数（如果适用）
+                if degree >= 3:
+                    expanded_coeffs['X1^3'] = 0
+                    expanded_coeffs['X1^2*X2'] = 0
+                    expanded_coeffs['X1*X2^2'] = 0
+                    expanded_coeffs['X2^3'] = 0
+                
+                # 展开标准化变换的影响
+                for feature_name, coeff in coeff_map.items():
+                    if feature_name == 'X1':
+                        expanded_coeffs['constant'] -= coeff * mean1 / std1
+                        expanded_coeffs['X1'] += coeff / std1
+                    elif feature_name == 'X2':
+                        expanded_coeffs['constant'] -= coeff * mean2 / std2
+                        expanded_coeffs['X2'] += coeff / std2
+                    elif feature_name == 'X1^2':
+                        expanded_coeffs['constant'] += coeff * (mean1**2) / (std1**2)
+                        expanded_coeffs['X1'] -= coeff * 2 * mean1 / (std1**2)
+                        expanded_coeffs['X1^2'] += coeff / (std1**2)
+                    elif feature_name == 'X1 X2':
+                        expanded_coeffs['constant'] += coeff * mean1 * mean2 / (std1 * std2)
+                        expanded_coeffs['X1'] -= coeff * mean2 / (std1 * std2)
+                        expanded_coeffs['X2'] -= coeff * mean1 / (std1 * std2)
+                        expanded_coeffs['X1*X2'] += coeff / (std1 * std2)
+                    elif feature_name == 'X2^2':
+                        expanded_coeffs['constant'] += coeff * (mean2**2) / (std2**2)
+                        expanded_coeffs['X2'] -= coeff * 2 * mean2 / (std2**2)
+                        expanded_coeffs['X2^2'] += coeff / (std2**2)
+                    elif degree >= 3:
+                        # 三次项展开
+                        if feature_name == 'X1^3':
+                            expanded_coeffs['constant'] -= coeff * (mean1**3) / (std1**3)
+                            expanded_coeffs['X1'] += coeff * 3 * (mean1**2) / (std1**3)
+                            expanded_coeffs['X1^2'] -= coeff * 3 * mean1 / (std1**3)
+                            expanded_coeffs['X1^3'] += coeff / (std1**3)
+                        elif feature_name == 'X1^2 X2':
+                            expanded_coeffs['constant'] -= coeff * (mean1**2) * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X1'] += coeff * 2 * mean1 * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X2'] += coeff * (mean1**2) / (std1**2 * std2)
+                            expanded_coeffs['X1^2'] -= coeff * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X1*X2'] -= coeff * 2 * mean1 / (std1**2 * std2)
+                            expanded_coeffs['X1^2*X2'] += coeff / (std1**2 * std2)
+                        elif feature_name == 'X1 X2^2':
+                            expanded_coeffs['constant'] -= coeff * mean1 * (mean2**2) / (std1 * std2**2)
+                            expanded_coeffs['X1'] += coeff * (mean2**2) / (std1 * std2**2)
+                            expanded_coeffs['X2'] += coeff * mean1 * 2 * mean2 / (std1 * std2**2)
+                            expanded_coeffs['X1*X2'] -= coeff * 2 * mean2 / (std1 * std2**2)
+                            expanded_coeffs['X2^2'] -= coeff * mean1 / (std1 * std2**2)
+                            expanded_coeffs['X1*X2^2'] += coeff / (std1 * std2**2)
+                        elif feature_name == 'X2^3':
+                            expanded_coeffs['constant'] -= coeff * (mean2**3) / (std2**3)
+                            expanded_coeffs['X2'] += coeff * 3 * (mean2**2) / (std2**3)
+                            expanded_coeffs['X2^2'] -= coeff * 3 * mean2 / (std2**3)
+                            expanded_coeffs['X2^3'] += coeff / (std2**3)
+                
+                # 构建公式字符串 - 使用更高精度
+                formula_terms = []
+                
+                # 常数项
+                formula_terms.append(f"{expanded_coeffs['constant']:.12f}")
+                
+                # 添加各项（如果系数足够大）
+                threshold = 1e-12
+                
+                if abs(expanded_coeffs['X1']) > threshold:
+                    formula_terms.append(f"{expanded_coeffs['X1']:.12f}*X1")
+                if abs(expanded_coeffs['X2']) > threshold:
+                    formula_terms.append(f"{expanded_coeffs['X2']:.12f}*X2")
+                if abs(expanded_coeffs['X1^2']) > threshold:
+                    formula_terms.append(f"{expanded_coeffs['X1^2']:.12f}*X1^2")
+                if abs(expanded_coeffs['X1*X2']) > threshold:
+                    formula_terms.append(f"{expanded_coeffs['X1*X2']:.12f}*X1*X2")
+                if abs(expanded_coeffs['X2^2']) > threshold:
+                    formula_terms.append(f"{expanded_coeffs['X2^2']:.12f}*X2^2")
+                    
+                if degree >= 3:
+                    if abs(expanded_coeffs['X1^3']) > threshold:
+                        formula_terms.append(f"{expanded_coeffs['X1^3']:.12f}*X1^3")
+                    if abs(expanded_coeffs['X1^2*X2']) > threshold:
+                        formula_terms.append(f"{expanded_coeffs['X1^2*X2']:.12f}*X1^2*X2")
+                    if abs(expanded_coeffs['X1*X2^2']) > threshold:
+                        formula_terms.append(f"{expanded_coeffs['X1*X2^2']:.12f}*X1*X2^2")
+                    if abs(expanded_coeffs['X2^3']) > threshold:
+                        formula_terms.append(f"{expanded_coeffs['X2^3']:.12f}*X2^3")
+                
+                # 组合公式
+                formula = f"Y = {formula_terms[0]}"  # 常数项
+                for term in formula_terms[1:]:
+                    if term.startswith('-'):
+                        formula += f" - {term[1:]}"  # 负号已经在项中
+                    else:
+                        formula += f" + {term}"
                 
                 return {
                     'formula': formula,
                     'variables': var_names,
                     'unit': unit,
                     'type': 'polynomial',
-                    'degree': poly.degree,
-                    'r2': 'N/A',  # 需要从验证数据计算
-                    'coefficients': {
-                        'constant': coeff_constant,
-                        'X1': coeff_X1,
-                        'X2': coeff_X2,
-                        'X1^2': coeff_X1_sq,
-                        'X1*X2': coeff_X1_X2,
-                        'X2^2': coeff_X2_sq
-                    }
+                    'degree': degree,
+                    'r2': 'N/A',
+                    'coefficients': expanded_coeffs
                 }
             
         except Exception as e:
@@ -691,13 +772,197 @@ class PredictionApp:
     
     def extract_log_transformed_formula(self, pipe, model_name):
         """提取对数变换模型的公式"""
-        return {
-            'formula': '复杂对数变换模型 - 请参考软件内部算法',
-            'variables': ["X1 (浓度%)", "X2 (温度°C)"],
-            'unit': 'cp' if 'viscosity' in model_name else self.get_unit_for_property(model_name),
-            'type': 'log_transformed',
-            'note': '此模型使用对数变换，公式较为复杂'
-        }
+        try:
+            # 获取TransformedTargetRegressor的内部回归器
+            inner_regressor = pipe.named_steps['reg'].regressor_
+            
+            # 获取多项式特征和标准化器
+            poly = pipe.named_steps.get('poly')
+            scaler = pipe.named_steps.get('scale')
+            
+            if poly is None or scaler is None:
+                return {
+                    'formula': '复杂对数变换模型 - 请参考软件内部算法',
+                    'variables': ["X1 (浓度%)", "X2 (温度°C)"],
+                    'unit': 'cp' if 'viscosity' in model_name else self.get_unit_for_property(model_name),
+                    'type': 'log_transformed',
+                    'note': '此模型使用对数变换，公式较为复杂'
+                }
+            
+            # 获取系数和截距
+            coefficients = inner_regressor.coef_
+            intercept = inner_regressor.intercept_
+            degree = poly.degree
+            
+            # 获取标准化参数
+            scale_mean = scaler.mean_
+            scale_std = scaler.scale_
+            
+            # 获取单位
+            if "density" in model_name:
+                unit = "kg/m³"
+            elif "viscosity" in model_name:
+                unit = "cp"
+            elif "vapor_pressure" in model_name:
+                unit = "kPa"
+            elif "enthalpy" in model_name:
+                unit = "kcal/kgNaOH"
+            elif "bubblepoint" in model_name:
+                unit = "°C"
+            elif "concentration" in model_name:
+                unit = "g/L"
+            elif "thermal_conductivity" in model_name:
+                unit = "kcal/m.hr.°C"
+            else:
+                unit = ""
+            
+            # 提取多项式公式（与普通多项式相同的逻辑）
+            if len(scale_mean) == 2:
+                mean1, mean2 = scale_mean[0], scale_mean[1]
+                std1, std2 = scale_std[0], scale_std[1]
+                
+                # 获取特征名称以正确映射系数
+                feature_names = poly.get_feature_names_out(['X1', 'X2'])
+                
+                # 构建系数映射
+                coeff_map = {}
+                for i, feature_name in enumerate(feature_names):
+                    if i < len(coefficients):
+                        coeff_map[feature_name] = coefficients[i]
+                
+                # 计算展开的系数
+                expanded_coeffs = {}
+                
+                # 常数项
+                expanded_coeffs['constant'] = intercept
+                
+                # 一次项系数
+                expanded_coeffs['X1'] = 0
+                expanded_coeffs['X2'] = 0
+                
+                # 二次项系数  
+                expanded_coeffs['X1^2'] = 0
+                expanded_coeffs['X1*X2'] = 0
+                expanded_coeffs['X2^2'] = 0
+                
+                # 三次项系数（如果适用）
+                if degree >= 3:
+                    expanded_coeffs['X1^3'] = 0
+                    expanded_coeffs['X1^2*X2'] = 0
+                    expanded_coeffs['X1*X2^2'] = 0
+                    expanded_coeffs['X2^3'] = 0
+                
+                # 展开标准化变换的影响
+                for feature_name, coeff in coeff_map.items():
+                    if feature_name == 'X1':
+                        expanded_coeffs['constant'] -= coeff * mean1 / std1
+                        expanded_coeffs['X1'] += coeff / std1
+                    elif feature_name == 'X2':
+                        expanded_coeffs['constant'] -= coeff * mean2 / std2
+                        expanded_coeffs['X2'] += coeff / std2
+                    elif feature_name == 'X1^2':
+                        expanded_coeffs['constant'] += coeff * (mean1**2) / (std1**2)
+                        expanded_coeffs['X1'] -= coeff * 2 * mean1 / (std1**2)
+                        expanded_coeffs['X1^2'] += coeff / (std1**2)
+                    elif feature_name == 'X1 X2':
+                        expanded_coeffs['constant'] += coeff * mean1 * mean2 / (std1 * std2)
+                        expanded_coeffs['X1'] -= coeff * mean2 / (std1 * std2)
+                        expanded_coeffs['X2'] -= coeff * mean1 / (std1 * std2)
+                        expanded_coeffs['X1*X2'] += coeff / (std1 * std2)
+                    elif feature_name == 'X2^2':
+                        expanded_coeffs['constant'] += coeff * (mean2**2) / (std2**2)
+                        expanded_coeffs['X2'] -= coeff * 2 * mean2 / (std2**2)
+                        expanded_coeffs['X2^2'] += coeff / (std2**2)
+                    elif degree >= 3:
+                        # 三次项展开
+                        if feature_name == 'X1^3':
+                            expanded_coeffs['constant'] -= coeff * (mean1**3) / (std1**3)
+                            expanded_coeffs['X1'] += coeff * 3 * (mean1**2) / (std1**3)
+                            expanded_coeffs['X1^2'] -= coeff * 3 * mean1 / (std1**3)
+                            expanded_coeffs['X1^3'] += coeff / (std1**3)
+                        elif feature_name == 'X1^2 X2':
+                            expanded_coeffs['constant'] -= coeff * (mean1**2) * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X1'] += coeff * 2 * mean1 * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X2'] += coeff * (mean1**2) / (std1**2 * std2)
+                            expanded_coeffs['X1^2'] -= coeff * mean2 / (std1**2 * std2)
+                            expanded_coeffs['X1*X2'] -= coeff * 2 * mean1 / (std1**2 * std2)
+                            expanded_coeffs['X1^2*X2'] += coeff / (std1**2 * std2)
+                        elif feature_name == 'X1 X2^2':
+                            expanded_coeffs['constant'] -= coeff * mean1 * (mean2**2) / (std1 * std2**2)
+                            expanded_coeffs['X1'] += coeff * (mean2**2) / (std1 * std2**2)
+                            expanded_coeffs['X2'] += coeff * mean1 * 2 * mean2 / (std1 * std2**2)
+                            expanded_coeffs['X1*X2'] -= coeff * 2 * mean2 / (std1 * std2**2)
+                            expanded_coeffs['X2^2'] -= coeff * mean1 / (std1 * std2**2)
+                            expanded_coeffs['X1*X2^2'] += coeff / (std1 * std2**2)
+                        elif feature_name == 'X2^3':
+                            expanded_coeffs['constant'] -= coeff * (mean2**3) / (std2**3)
+                            expanded_coeffs['X2'] += coeff * 3 * (mean2**2) / (std2**3)
+                            expanded_coeffs['X2^2'] -= coeff * 3 * mean2 / (std2**3)
+                            expanded_coeffs['X2^3'] += coeff / (std2**3)
+                
+                # 构建多项式部分 - 使用更高精度
+                polynomial_terms = []
+                
+                # 常数项
+                polynomial_terms.append(f"{expanded_coeffs['constant']:.12f}")
+                
+                # 添加各项（如果系数足够大）
+                threshold = 1e-12
+                
+                if abs(expanded_coeffs['X1']) > threshold:
+                    polynomial_terms.append(f"{expanded_coeffs['X1']:.12f}*X1")
+                if abs(expanded_coeffs['X2']) > threshold:
+                    polynomial_terms.append(f"{expanded_coeffs['X2']:.12f}*X2")
+                if abs(expanded_coeffs['X1^2']) > threshold:
+                    polynomial_terms.append(f"{expanded_coeffs['X1^2']:.12f}*X1^2")
+                if abs(expanded_coeffs['X1*X2']) > threshold:
+                    polynomial_terms.append(f"{expanded_coeffs['X1*X2']:.12f}*X1*X2")
+                if abs(expanded_coeffs['X2^2']) > threshold:
+                    polynomial_terms.append(f"{expanded_coeffs['X2^2']:.12f}*X2^2")
+                    
+                if degree >= 3:
+                    if abs(expanded_coeffs['X1^3']) > threshold:
+                        polynomial_terms.append(f"{expanded_coeffs['X1^3']:.12f}*X1^3")
+                    if abs(expanded_coeffs['X1^2*X2']) > threshold:
+                        polynomial_terms.append(f"{expanded_coeffs['X1^2*X2']:.12f}*X1^2*X2")
+                    if abs(expanded_coeffs['X1*X2^2']) > threshold:
+                        polynomial_terms.append(f"{expanded_coeffs['X1*X2^2']:.12f}*X1*X2^2")
+                    if abs(expanded_coeffs['X2^3']) > threshold:
+                        polynomial_terms.append(f"{expanded_coeffs['X2^3']:.12f}*X2^3")
+                
+                # 组合多项式
+                polynomial = polynomial_terms[0]  # 常数项
+                for term in polynomial_terms[1:]:
+                    if term.startswith('-'):
+                        polynomial += f" - {term[1:]}"  # 负号已经在项中
+                    else:
+                        polynomial += f" + {term}"
+                
+                # 构建 log(Y) 公式用于显示
+                log_formula = f"log(Y) = {polynomial}"
+                
+                # 最终公式 - 明确显示exp包装
+                final_formula = f"Y = exp({polynomial})\n\n注意：必须对多项式结果应用exp函数！"
+                
+                return {
+                    'formula': final_formula,
+                    'variables': ["X1 (浓度%)", "X2 (温度°C)"],
+                    'unit': unit,
+                    'type': 'log_transformed',
+                    'degree': degree,
+                    'log_formula': log_formula,
+                    'note': '此模型使用对数变换: Y = exp(多项式)',
+                    'coefficients': expanded_coeffs
+                }
+            
+        except Exception as e:
+            return {
+                'formula': f'对数变换模型公式提取出错: {str(e)}',
+                'variables': ["X1 (浓度%)", "X2 (温度°C)"],
+                'unit': 'cp' if 'viscosity' in model_name else self.get_unit_for_property(model_name),
+                'type': 'log_transformed',
+                'note': '此模型使用对数变换，公式较为复杂'
+            }
     
     def get_unit_for_property(self, model_name):
         """获取属性的单位"""
@@ -1070,12 +1335,31 @@ class PredictionApp:
                 formula_content += "系数详情:\n"
                 for term, coeff in formula_info['coefficients'].items():
                     if abs(coeff) > 1e-10:
-                        formula_content += f"• {term}: {coeff:.6f}\n"
+                        formula_content += f"• {term}: {coeff:.12f}\n"
                 
                 formula_content += f"\n模型信息:\n"
                 formula_content += f"• 类型: {formula_info['degree']}次多项式回归\n"
                 formula_content += f"• 算法: Ridge回归 + 正则化\n"
             
+            elif formula_info['type'] == 'log_transformed':
+                formula_content += f"数学公式:\n{formula_info['formula']}\n\n"
+                formula_content += "变量说明:\n"
+                for i, var in enumerate(formula_info['variables']):
+                    formula_content += f"• {var}\n"
+                formula_content += f"• Y = {display_name} ({formula_info['unit']})\n\n"
+                
+                if 'coefficients' in formula_info:
+                    formula_content += "系数详情:\n"
+                    for term, coeff in formula_info['coefficients'].items():
+                        if abs(coeff) > 1e-12:
+                            formula_content += f"• {term}: {coeff:.12f}\n"
+                    formula_content += "\n"
+                
+                formula_content += f"模型信息:\n"
+                formula_content += f"• 类型: {formula_info['degree']}次多项式回归 + 对数变换\n"
+                formula_content += f"• 算法: Ridge回归 + 正则化 + log变换\n"
+                formula_content += f"• 说明: {formula_info['note']}\n"
+                
             elif formula_info['type'] == 'neural_network_log':
                 # HCl vapor pressure neural network with log transformation
                 formula_content += f"预测公式:\n{formula_info['formula']}\n"
