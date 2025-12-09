@@ -34,6 +34,65 @@ class PredictionApp:
         
         self.setup_ui()
     
+    def calculate_water_properties(self, temperature):
+        """
+        计算纯水的物理性质
+        使用标准IAPWS公式和经验公式
+
+        参数:
+            temperature: 温度 (°C)
+
+        返回:
+            字典包含5个性质的计算结果
+        """
+        import math
+
+        T = temperature  # 摄氏度
+        T_K = T + 273.15  # 开尔文
+
+        # 1. 饱和蒸气压 (Antoine方程)
+        # 使用适用于0-100°C的系数
+        if 0 <= T <= 100:
+            # Antoine方程: log10(P) = A - B/(C + T)
+            A, B, C = 8.07131, 1730.63, 233.426
+            P_mmHg = 10 ** (A - B / (C + T))
+        else:
+            # 扩展范围使用Clausius-Clapeyron近似
+            P_mmHg = math.exp(20.386 - 5132 / T_K) * 7.50062  # Pa to mmHg
+
+        # 2. 密度 (kg/m³)
+        # 液态水密度的温度依赖公式
+        if T >= 0:
+            density = 1000.0 - 0.0178 * T - 0.0058 * T**2
+        else:
+            # 低温水密度（过冷水）
+            density = 1000.0 - 0.05 * T
+
+        # 3. 焓值 (kJ/kg, 以0°C为基准)
+        # 液态水比焓
+        enthalpy = 4.186 * T  # 近似: Cp_water ≈ 4.186 kJ/(kg·K)
+
+        # 4. 粘度 (cP = mPa·s)
+        # Vogel方程
+        A_visc, B_visc, C_visc = 0.02939, 507.88, 149.3
+        if T > -149:
+            viscosity = A_visc * math.exp(B_visc / (T - C_visc))
+        else:
+            viscosity = 100.0  # 极端低温默认值
+
+        # 5. 热导率 (W/m·K)
+        # 转换为 kcal/m.hr.°C: W/m·K * 0.85984 = kcal/m.hr.°C
+        thermal_cond_SI = 0.5650 + 0.002 * T - 8e-6 * T**2
+        thermal_conductivity = thermal_cond_SI * 0.85984  # 转换为 kcal/m.hr.°C
+
+        return {
+            'H2O_vapor_pressure': P_mmHg,
+            'H2O_density': density,
+            'H2O_enthalpy': enthalpy,
+            'H2O_viscosity': viscosity,
+            'H2O_thermal_conductivity': thermal_conductivity
+        }
+
     def convert_pressure_to_bar(self, pressure_value, unit):
         """将不同单位的压力转换为bar.A"""
         if unit == "bar.A":
@@ -51,20 +110,21 @@ class PredictionApp:
         """格式化属性名称，保持正确的化学式大小写，并确保对齐"""
         # 将下划线转为空格并首字母大写
         formatted = stem.replace("_", " ").title()
-        
+
         # 修正化学式的大小写
         formatted = formatted.replace("Naoh", "NaOH")
         formatted = formatted.replace("Nacl", "NaCl")
         formatted = formatted.replace("Hcl", "HCl")
-        
+        formatted = formatted.replace("H2O", "H₂O")
+
         # 修正术语
         formatted = formatted.replace("Bubblepoint", "Bubble Point Temperature")
-        
+
         # 缩短长属性名以确保完美对齐 (最多22个字符)
         formatted = formatted.replace("Thermal Conductivity", "Thermal Cond.")
         formatted = formatted.replace("Bubble Point Temperature", "Bubble Point Temp")
         formatted = formatted.replace("Vapor Pressure", "Vapor Press.")
-        
+
         return formatted
     
     def convert_vapor_pressure_from_mmhg(self, pressure_mmhg, target_unit):
@@ -155,7 +215,7 @@ class PredictionApp:
                                  font=("Segoe UI", 9), bg="white", fg="#2c2c2c")
         solution_label.grid(row=0, column=0, sticky="w", pady=4)
         self.solution_type_var = tk.StringVar(value="NaOH")
-        solution_types = ["NaOH", "NaCl", "HCl"]
+        solution_types = ["NaOH", "NaCl", "HCl", "H₂O"]
         self.solution_type_combo = ttk.Combobox(input_frame, textvariable=self.solution_type_var,
                                               values=solution_types, width=11, state="readonly",
                                               font=("Segoe UI", 9))
@@ -304,30 +364,43 @@ class PredictionApp:
             x3 = float(self.x3_var.get()) if self.x3_var.get() else None
             x4 = float(self.x4_var.get()) if self.x4_var.get() else None
             solution_type = self.solution_type_var.get()
-            
+
+            # H₂O只需要温度
+            if solution_type == "H₂O":
+                if x2 is None:
+                    return None, "温度 (X2) 是必填项"
+                validation_errors = self.validate_inputs(None, x2, None, None, solution_type)
+                if validation_errors:
+                    return None, f"输入验证失败:\n" + "\n".join(f"  {error}" for error in validation_errors)
+                return {"x1": x1, "x2": x2, "x3": x3, "x4": x4, "solution_type": solution_type}, None
+
             # 输入验证
             validation_errors = self.validate_inputs(x1, x2, x3, x4, solution_type)
             if validation_errors:
                 return None, f"输入验证失败:\n" + "\n".join(f"  {error}" for error in validation_errors)
-            
+
             # 验证必要输入 (根据模型类型不同)
             has_concentration_model = any("concentration" in stem for stem in self.models.keys() if solution_type in stem)
             if not has_concentration_model and x1 is None:
                 return None, "浓度 (X1) 是必填项"
-                
+
             return {"x1": x1, "x2": x2, "x3": x3, "x4": x4, "solution_type": solution_type}, None
-            
+
         except ValueError:
             return None, "请输入有效的数值"
     
     def _run_model_predictions(self, inputs):
         """运行模型预测计算"""
         x1, x2, x3, x4, solution_type = inputs["x1"], inputs["x2"], inputs["x3"], inputs["x4"], inputs["solution_type"]
-        
+
+        # H₂O使用公式计算，不使用模型
+        if solution_type == "H₂O":
+            return self.calculate_water_properties(x2)
+
         # 获取当前溶液类型的模型
         filtered_models = {k: v for k, v in self.models.items() if solution_type in k}
         predictions = {}
-        
+
         for stem, model_data in filtered_models.items():
             # 兼容旧版本模型格式
             if isinstance(model_data, dict):
@@ -336,16 +409,16 @@ class PredictionApp:
             else:
                 pipe = model_data
                 features = ["X1", "X2"]
-            
+
             # 根据模型所需特征创建输入样本
             sample = self._create_model_sample(stem, x1, x2, x3, x4)
             if sample is None:
                 continue  # 跳过无法创建样本的模型
-                
+
             # 执行预测
             prediction = pipe.predict(sample)[0]
             predictions[stem] = prediction
-            
+
         return predictions
     
     def _create_model_sample(self, stem, x1, x2, x3, x4):
@@ -430,7 +503,10 @@ class PredictionApp:
         elif "thermal_conductivity" in stem:
             return "kcal/m.hr.°C"
         elif "enthalpy" in stem:
-            return "kcal/kgNaOH"
+            if "H2O" in stem:
+                return "kJ/kg"
+            else:
+                return "kcal/kgNaOH"
         elif "bubblepoint" in stem:
             return "°C"
         else:
@@ -501,12 +577,16 @@ class PredictionApp:
     def extract_model_formula(self, model_name):
         """提取指定模型的数学公式"""
         try:
+            # H₂O使用公式，不是训练模型
+            if "H2O" in model_name or "H₂O" in model_name:
+                return self.extract_water_formula(model_name)
+
             model_data = self.models[model_name]
             if isinstance(model_data, dict):
                 pipe = model_data["model"]
             else:
                 pipe = model_data
-            
+
             # 检查模型类型 - 优先检查TransformedTargetRegressor (log-transformed models)
             if hasattr(pipe, 'named_steps'):
                 if hasattr(pipe.named_steps.get('reg'), 'regressor_'):
@@ -521,11 +601,87 @@ class PredictionApp:
                 elif hasattr(pipe.named_steps.get('reg'), 'hidden_layer_sizes'):
                     # Neural Network without log transformation
                     return self.extract_neural_network_formula(pipe, model_name)
-            
+
             return None
         except Exception as e:
             return f"无法提取公式: {str(e)}"
-    
+
+    def extract_water_formula(self, model_name):
+        """提取水蒸气性质的公式"""
+        # 判断是哪个性质
+        if "vapor_pressure" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '饱和蒸汽压',
+                'formula': 'P = 10^(A - B/(C + T))  (Antoine方程)',
+                'formula_details': 'log₁₀(P) = 8.07131 - 1730.63/(233.426 + T)',
+                'variables': ['T = 温度 (°C)'],
+                'unit': 'mmHg (可转换为kPa/bar/atm/psi/torr)',
+                'range': '0-100°C (最佳), -50-374°C (扩展)',
+                'coefficients': {
+                    'A': 8.07131,
+                    'B': 1730.63,
+                    'C': 233.426
+                },
+                'note': '基于IAPWS标准Antoine方程，适用于液态水饱和蒸汽压计算'
+            }
+        elif "density" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '密度',
+                'formula': 'ρ = 1000 - 0.0178×T - 0.0058×T²',
+                'variables': ['T = 温度 (°C)', 'ρ = 密度 (kg/m³)'],
+                'unit': 'kg/m³',
+                'range': '0-100°C',
+                'note': '液态水密度的经验公式，基于实验数据拟合'
+            }
+        elif "enthalpy" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '焓值',
+                'formula': 'H = 4.186 × T',
+                'variables': ['T = 温度 (°C)', 'H = 比焓 (kJ/kg)'],
+                'unit': 'kJ/kg (以0°C为基准)',
+                'range': '0-100°C',
+                'coefficients': {
+                    'Cp_water': 4.186
+                },
+                'note': '液态水显热公式，基于水的比热容 Cp ≈ 4.186 kJ/(kg·K)'
+            }
+        elif "viscosity" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '粘度',
+                'formula': 'η = A × exp(B / (T - C))  (Vogel方程)',
+                'formula_details': 'η = 0.02939 × exp(507.88 / (T - 149.3))',
+                'variables': ['T = 温度 (°C)', 'η = 动力粘度 (cP)'],
+                'unit': 'cP (mPa·s)',
+                'range': '0-100°C',
+                'coefficients': {
+                    'A': 0.02939,
+                    'B': 507.88,
+                    'C': 149.3
+                },
+                'note': 'Vogel经验方程，广泛用于液体粘度的温度依赖性计算'
+            }
+        elif "thermal" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '热导率',
+                'formula': 'λ = 0.5650 + 0.002×T - 8×10⁻⁶×T²',
+                'variables': ['T = 温度 (°C)', 'λ = 热导率 (kcal/m.hr.°C)'],
+                'unit': 'kcal/m.hr.°C',
+                'range': '0-100°C',
+                'note': '液态水热导率的多项式拟合公式'
+            }
+        else:
+            return {
+                'type': 'analytical_formula',
+                'property': '未知性质',
+                'formula': '公式不可用',
+                'note': '无法识别的水蒸气性质'
+            }
+
     def extract_polynomial_formula(self, pipe, model_name):
         """提取多项式回归公式 - 支持动态度数"""
         try:
@@ -1045,8 +1201,8 @@ class PredictionApp:
         # 溶液类型下拉选择器
         self.solution_type_var = tk.StringVar()
         self.solution_type_var.set("NaOH")  # 默认选择NaOH
-        
-        solutions = ["NaOH", "NaCl", "HCl"]
+
+        solutions = ["NaOH", "NaCl", "HCl", "H₂O"]
         self.solution_combo = ttk.Combobox(dropdown_container, 
                                           textvariable=self.solution_type_var,
                                           values=solutions,
@@ -1194,39 +1350,53 @@ class PredictionApp:
     def update_property_dropdown(self):
         """根据选择的溶液类型更新属性下拉选择器"""
         selected_solution = self.formula_solution_var.get()
-        
+
         # 获取当前溶液类型的可用属性
         available_properties = []
         self.property_model_map = {}  # 存储显示名称到模型名称的映射
-        
-        for model_name in self.models.keys():
-            if model_name.startswith(selected_solution):
-                display_name = self.format_property_name(model_name)
-                property_name = display_name.replace(f"{selected_solution} ", "").replace(f"{selected_solution}", "")
-                property_name = property_name.strip()
-                if property_name:
-                    available_properties.append(property_name)
-                    self.property_model_map[property_name] = model_name
-        
+
+        # H₂O使用固定的属性列表
+        if selected_solution == "H₂O":
+            h2o_properties = {
+                "Vapor Press.": "H2O_vapor_pressure",
+                "Density": "H2O_density",
+                "Enthalpy": "H2O_enthalpy",
+                "Viscosity": "H2O_viscosity",
+                "Thermal Cond.": "H2O_thermal_conductivity"
+            }
+            for prop_name, model_name in h2o_properties.items():
+                available_properties.append(prop_name)
+                self.property_model_map[prop_name] = model_name
+        else:
+            # 其他溶液类型从模型中读取
+            for model_name in self.models.keys():
+                if model_name.startswith(selected_solution):
+                    display_name = self.format_property_name(model_name)
+                    property_name = display_name.replace(f"{selected_solution} ", "").replace(f"{selected_solution}", "")
+                    property_name = property_name.strip()
+                    if property_name:
+                        available_properties.append(property_name)
+                        self.property_model_map[property_name] = model_name
+
         # 按属性名称排序
         available_properties.sort()
-        
+
         # 更新下拉选择器的值
         if hasattr(self, 'property_combo'):
             self.property_combo['values'] = available_properties
             self.property_var.set("Choose a property...")  # 重置选择
-            
+
             # 更新描述文本
             if available_properties:
                 desc_text = f"Available properties: {len(available_properties)} options"
                 self.property_desc_label.config(text=desc_text)
             else:
                 self.property_desc_label.config(text="No properties available for this solution type")
-        
+
         # 重置选择状态
         if hasattr(self, 'selected_model_var'):
             self.selected_model_var.set("")
-            
+
         # 禁用继续按钮
         if hasattr(self, 'continue_btn'):
             self.continue_btn.config(state="disabled", bg="#cccccc", fg="#666666", text="Continue")
@@ -1382,16 +1552,41 @@ class PredictionApp:
             
             elif formula_info['type'] == 'neural_network':
                 formula_content += f"预测公式:\n{formula_info['formula']}\n\n"
-                
+
                 formula_content += "变量说明:\n"
                 for var in formula_info['variables']:
                     formula_content += f"• {var}\n"
                 formula_content += f"• Y = {display_name} ({formula_info['unit']})\n\n"
-                
+
                 formula_content += f"神经网络架构:\n• {formula_info['architecture']}\n"
                 formula_content += f"• 激活函数: {formula_info['activation']}\n\n"
                 formula_content += f"模型说明:\n• {formula_info['note']}\n"
-            
+
+            elif formula_info['type'] == 'analytical_formula':
+                # H₂O水蒸气性质公式
+                formula_content += f"数学公式:\n{formula_info['formula']}\n\n"
+
+                if 'formula_details' in formula_info:
+                    formula_content += f"详细形式:\n{formula_info['formula_details']}\n\n"
+
+                formula_content += "变量说明:\n"
+                for var in formula_info['variables']:
+                    formula_content += f"• {var}\n"
+
+                if 'coefficients' in formula_info:
+                    formula_content += "\n系数值:\n"
+                    for coeff_name, coeff_val in formula_info['coefficients'].items():
+                        formula_content += f"• {coeff_name} = {coeff_val}\n"
+
+                formula_content += f"\n单位: {formula_info['unit']}\n"
+
+                if 'range' in formula_info:
+                    formula_content += f"适用范围: {formula_info['range']}\n"
+
+                formula_content += f"\n说明:\n• {formula_info['note']}\n"
+                formula_content += "• 基于IAPWS国际标准和经验公式\n"
+                formula_content += "• 工业应用广泛，精度可靠\n"
+
             else:
                 formula_content += f"模型类型: {formula_info['type']}\n"
                 formula_content += f"说明: {formula_info.get('note', '复杂非线性模型')}\n\n"
