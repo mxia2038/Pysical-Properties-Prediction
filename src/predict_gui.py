@@ -143,6 +143,13 @@ class PredictionApp:
             return pressure_value * 0.980665  # 1 kg/cm2 = 0.980665 bar
         else:
             return pressure_value
+
+    def convert_pressure_to_mmHg(self, pressure_value, unit):
+        """将不同单位的压力转换为mmHg（用于饱和温度计算）"""
+        # 先转换为bar
+        pressure_bar = self.convert_pressure_to_bar(pressure_value, unit)
+        # 再转换为mmHg: 1 bar = 750.062 mmHg
+        return pressure_bar * 750.062
     
     def format_property_name(self, stem):
         """格式化属性名称，保持正确的化学式大小写，并确保对齐"""
@@ -403,11 +410,13 @@ class PredictionApp:
             x4 = float(self.x4_var.get()) if self.x4_var.get() else None
             solution_type = self.solution_type_var.get()
 
-            # H₂O只需要温度
+            # H₂O可以输入温度或压力
             if solution_type == "H₂O":
-                if x2 is None:
-                    return None, "温度 (X2) 是必填项"
-                validation_errors = self.validate_inputs(None, x2, None, None, solution_type)
+                if x2 is None and x4 is None:
+                    return None, "H₂O计算需要输入温度(X2)或压力(X4)中的至少一个"
+                if x2 is not None and x4 is not None:
+                    return None, "H₂O计算时温度(X2)和压力(X4)只能输入一个"
+                validation_errors = self.validate_inputs(None, x2, None, x4, solution_type)
                 if validation_errors:
                     return None, f"输入验证失败:\n" + "\n".join(f"  {error}" for error in validation_errors)
                 return {"x1": x1, "x2": x2, "x3": x3, "x4": x4, "solution_type": solution_type}, None
@@ -433,7 +442,20 @@ class PredictionApp:
 
         # H₂O使用公式计算，不使用模型
         if solution_type == "H₂O":
-            return self.calculate_water_properties(x2)
+            if x2 is not None:
+                # 输入温度，计算所有性质（包括蒸汽压和饱和温度验证）
+                return self.calculate_water_properties(x2)
+            elif x4 is not None:
+                # 输入压力，只计算饱和温度
+                # 首先需要将压力转换为mmHg
+                pressure_unit = self.pressure_unit_var.get()
+                pressure_mmHg = self.convert_pressure_to_mmHg(x4, pressure_unit)
+                sat_temp = self.calculate_saturation_temperature(pressure_mmHg)
+                if sat_temp is None:
+                    raise ValueError(f"压力值 {x4} {pressure_unit} 超出有效范围")
+                return {'H2O_saturation_temperature': sat_temp}
+            else:
+                raise ValueError("H₂O计算需要温度或压力输入")
 
         # 获取当前溶液类型的模型
         filtered_models = {k: v for k, v in self.models.items() if solution_type in k}
