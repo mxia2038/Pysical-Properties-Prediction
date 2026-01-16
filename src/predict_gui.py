@@ -85,13 +85,51 @@ class PredictionApp:
         thermal_cond_SI = 0.5650 + 0.002 * T - 8e-6 * T**2
         thermal_conductivity = thermal_cond_SI * 0.85984  # 转换为 kcal/m.hr.°C
 
+        # 6. 饱和温度（验证用，应该等于输入的温度）
+        # 使用计算出的蒸汽压反算温度，作为自洽性检验
+        saturation_temperature = self.calculate_saturation_temperature(P_mmHg)
+
         return {
             'H2O_vapor_pressure': P_mmHg,
+            'H2O_saturation_temperature': saturation_temperature if saturation_temperature else T,
             'H2O_density': density,
             'H2O_enthalpy': enthalpy,
             'H2O_viscosity': viscosity,
             'H2O_thermal_conductivity': thermal_conductivity
         }
+
+    def calculate_saturation_temperature(self, pressure_mmHg):
+        """
+        根据压力计算饱和水蒸气温度
+        使用Antoine方程的反函数
+
+        参数:
+            pressure_mmHg: 压力 (mmHg)
+
+        返回:
+            饱和温度 (°C)
+        """
+        import math
+
+        # Antoine方程: log10(P) = A - B/(C + T)
+        # 反解: T = B/(A - log10(P)) - C
+        A, B, C = 8.07131, 1730.63, 233.426
+
+        # 防止压力过小导致数学错误
+        if pressure_mmHg <= 0:
+            return None
+
+        try:
+            log_P = math.log10(pressure_mmHg)
+            T_sat = B / (A - log_P) - C
+
+            # 合理范围检查 (-50°C to 374°C，水的临界点)
+            if -50 <= T_sat <= 374:
+                return T_sat
+            else:
+                return None
+        except (ValueError, ZeroDivisionError):
+            return None
 
     def convert_pressure_to_bar(self, pressure_value, unit):
         """将不同单位的压力转换为bar.A"""
@@ -673,6 +711,22 @@ class PredictionApp:
                 'unit': 'kcal/m.hr.°C',
                 'range': '0-100°C',
                 'note': '液态水热导率的多项式拟合公式'
+            }
+        elif "saturation_temperature" in model_name.lower():
+            return {
+                'type': 'analytical_formula',
+                'property': '饱和温度',
+                'formula': 'T_sat = B/(A - log₁₀(P)) - C  (Antoine方程反函数)',
+                'formula_details': 'T_sat = 1730.63/(8.07131 - log₁₀(P)) - 233.426',
+                'variables': ['P = 压力 (mmHg)', 'T_sat = 饱和温度 (°C)'],
+                'unit': '°C',
+                'range': '压力范围：4.58-760 mmHg (对应0-100°C)',
+                'coefficients': {
+                    'A': 8.07131,
+                    'B': 1730.63,
+                    'C': 233.426
+                },
+                'note': 'Antoine方程的反函数，根据给定压力计算对应的饱和温度（沸点）'
             }
         else:
             return {
@@ -1359,6 +1413,7 @@ class PredictionApp:
         if selected_solution == "H₂O":
             h2o_properties = {
                 "Vapor Press.": "H2O_vapor_pressure",
+                "Sat. Temp.": "H2O_saturation_temperature",
                 "Density": "H2O_density",
                 "Enthalpy": "H2O_enthalpy",
                 "Viscosity": "H2O_viscosity",
