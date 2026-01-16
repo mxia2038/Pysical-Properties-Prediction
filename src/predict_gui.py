@@ -446,14 +446,15 @@ class PredictionApp:
                 # 输入温度，计算所有性质（包括蒸汽压和饱和温度验证）
                 return self.calculate_water_properties(x2)
             elif x3 is not None:
-                # 输入压力，只计算饱和温度
+                # 输入压力，先计算饱和温度，再计算该温度下的所有性质
                 # 首先需要将压力转换为mmHg
                 pressure_unit = self.pressure_unit_var.get()
                 pressure_mmHg = self.convert_pressure_to_mmHg(x3, pressure_unit)
                 sat_temp = self.calculate_saturation_temperature(pressure_mmHg)
                 if sat_temp is None:
                     raise ValueError(f"压力值 {x3} {pressure_unit} 超出有效范围")
-                return {'H2O_saturation_temperature': sat_temp}
+                # 使用计算出的饱和温度计算所有水性质
+                return self.calculate_water_properties(sat_temp)
             else:
                 raise ValueError("H₂O计算需要温度或压力输入")
 
